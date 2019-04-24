@@ -13,7 +13,7 @@ def filter_instances(project):
     else:
         instances = ec2.instances.all()
 
-        return instances
+    return instances
 
 @click.group()
 def instances():
