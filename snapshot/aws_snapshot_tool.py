@@ -5,10 +5,12 @@ import click
 session = boto3.Session(profile_name='aws_snapshot_tool')
 ec2 = session.resource('ec2')
 
-def filter_instances(project):
+def filter_instances(project, instance=False):
     instances = []
 
-    if project:
+    if instance:
+        instances.append(ec2.Instance(instance))
+    elif project:
         filters = [{'Name': 'tag:Project', 'Values':[project]}]
         instances = ec2.instances.filter(Filters=filters)
     else:
@@ -29,14 +31,16 @@ def snapshots():
     """Commands for snapshots"""
 
 @snapshots.command('list')
+@click.option('--instance', default=None,
+    help="List snapshots for a specific instance")
 @click.option('--project', default=None,
     help="Only snapshots for project (tag Project:<name>)")
 @click.option('--all', 'list_all', default=False, is_flag=True,
     help="List all snapshots for each volume not just the most recent")
-def list_snapshots(project, list_all):
+def list_snapshots(project, instance, list_all):
     "List EC2 snapshots"
 
-    instances = filter_instances(project)
+    instances = filter_instances(project, instance)
 
     for i in instances:
         for v in i.volumes.all():
@@ -59,12 +63,14 @@ def volumes():
     """Commands for volumes"""
 
 @volumes.command('list')
+@click.option('--instance', default=None,
+    help="List snapshots for a specific instance")
 @click.option('--project', default=None,
     help="Only volumes for project (tag Project:<name>)")
-def list_volumes(project):
+def list_volumes(project, instance):
     "List EC2 volumes"
 
-    instances = filter_instances(project)
+    instances = filter_instances(project, instance)
 
     for i in instances:
         for v in i.volumes.all():
@@ -84,12 +90,14 @@ def instances():
 
 @instances.command('snapshot',
     help="Create snapshots of all volumes")
+@click.option('--instance', default=None,
+    help="Create snapshot for a specific instance")
 @click.option('--project', default=None,
     help="Only instances for project (tag Project:<name>)")
-def create_snapshot(project):
+def create_snapshot(project, instance):
     "Create snapshots for EC2 instances"
 
-    instances = filter_instances(project)
+    instances = filter_instances(project, instance)
 
     for i in instances:
         print("Stopping {0}...".format(i.id))
@@ -134,12 +142,14 @@ def list_instances(project):
     return
 
 @instances.command('start')
+@click.option('--instance', default=None,
+    help="Start a specific instance")
 @click.option('--project', default=None,
     help="Only instances for project (tag Project:<name>)")
-def start_instances(project):
+def start_instances(project, instance):
     "Start EC2 instances"
 
-    instances = filter_instances(project)
+    instances = filter_instances(project, instance)
 
     for i in instances:
         print("Starting {0}...".format(i.id))
@@ -152,12 +162,14 @@ def start_instances(project):
     return
 
 @instances.command('stop')
+@click.option('--instance', default=None,
+    help="Stop a specific instance")
 @click.option('--project', default=None,
     help="Only instances for project (tag Project:<name>)")
-def stop_instances(project):
+def stop_instances(project, instance):
     "Stop EC2 instances"
 
-    instances = filter_instances(project)
+    instances = filter_instances(project, instance)
 
     for i in instances:
         print("Stopping {0}...".format(i.id))
@@ -170,12 +182,14 @@ def stop_instances(project):
     return
 
 @instances.command('reboot')
+@click.option('--instance', default=None,
+    help="Reboot a specific instance")
 @click.option('--project', default=None,
     help="Only instances for project (tag Project:<name>)")
-def reboot_instances(project):
+def reboot_instances(project, instance):
     "Reboot EC2 instances"
 
-    instances = filter_instances(project)
+    instances = filter_instances(project, instance)
 
     for i in instances:
         print("Rebooting {0}...".format(i.id))
