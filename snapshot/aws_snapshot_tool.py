@@ -2,8 +2,8 @@ import boto3
 import botocore
 import click
 
-session = boto3.Session(profile_name='aws_snapshot_tool')
-ec2 = session.resource('ec2')
+#session = boto3.Session(profile_name='aws_snapshot_tool')
+#ec2 = session.resource('ec2')
 
 def filter_instances(project, instance=False):
     instances = []
@@ -23,8 +23,15 @@ def has_pending_snapshot(volume):
     return snapshots and snapshots[0].state == 'pending'
 
 @click.group()
-def cli():
+@click.option('--profile', default='aws_snapshot_tool',
+    help="Specify a different profile from the default 'aws_snapshot_tool'")
+def cli(profile):
     """AWS Snapshot Tool manages snapshots"""
+
+    global session, ec2
+
+    session = boto3.Session(profile_name=profile)
+    ec2 = session.resource('ec2')
 
 @cli.group('snapshots')
 def snapshots():
