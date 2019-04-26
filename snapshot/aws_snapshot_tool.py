@@ -121,7 +121,11 @@ def create_snapshot(project, instance, force_run):
                     continue
 
                 print("  Creating snapshot of {0}".format(v.id))
-                v.create_snapshot(Description="Created by aws_snapshot_tool")
+                try:
+                    v.create_snapshot(Description="Created by aws_snapshot_tool")
+                except botocore.exceptions.ClientError as e:
+                    print("  Could not snapshot volume {0}. ".format(v.id) + str(e))
+                    continue
 
             print("Starting {0}...".format(i.id))
             i.start()
