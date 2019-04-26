@@ -108,12 +108,14 @@ def create_snapshot(project, instance, force_run):
 
     if ((project or force_run == True) or instance):
         instances = filter_instances(project, instance)
+        running_instances = []
 
         for i in instances:
-            print("Stopping {0}...".format(i.id))
-
-            i.stop()
-            i.wait_until_stopped()
+            if i.state['Name'] == 'running':
+                running_instances.append(i.id)
+                print("Stopping {0}...".format(i.id))
+                i.stop()
+                i.wait_until_stopped()
 
             for v in i.volumes.all():
                 if has_pending_snapshot(v):
@@ -127,9 +129,10 @@ def create_snapshot(project, instance, force_run):
                     print("  Could not snapshot volume {0}. ".format(v.id) + str(e))
                     continue
 
-            print("Starting {0}...".format(i.id))
-            i.start()
-            i.wait_until_running()
+            if i.id in running_instances:
+                print("Starting {0}...".format(i.id))
+                i.start()
+                i.wait_until_running()
 
         print("Finished")
     else:
