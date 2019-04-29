@@ -111,7 +111,7 @@ def create_snapshot(project, instance, force_run, age):
 
     ok_to_snapshot = True
 
-    if ((project or force_run == True) or instance):
+    if (project or force_run or instance):
         instances = filter_instances(project, instance)
         running_instances = []
 
@@ -182,7 +182,7 @@ def list_instances(project):
 def start_instances(project, instance, force_run):
     "Start EC2 instances"
 
-    if ((project or force_run == True) or instance):
+    if (project or force_run or instance):
         instances = filter_instances(project, instance)
 
         for i in instances:
@@ -207,7 +207,7 @@ def start_instances(project, instance, force_run):
 def stop_instances(project, instance, force_run):
     "Stop EC2 instances"
 
-    if ((project or force_run == True) or instance):
+    if (project or force_run or instance):
         instances = filter_instances(project, instance)
 
         for i in instances:
@@ -232,7 +232,7 @@ def stop_instances(project, instance, force_run):
 def reboot_instances(project, instance, force_run):
     "Reboot EC2 instances"
 
-    if ((project or force_run == True) or instance):
+    if (project or force_run or instance):
         instances = filter_instances(project, instance)
 
         for i in instances:
