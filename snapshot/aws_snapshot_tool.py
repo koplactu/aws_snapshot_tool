@@ -1,6 +1,7 @@
 import boto3
 import botocore
 import click
+import datetime
 
 #session = boto3.Session(profile_name='aws_snapshot_tool')
 #ec2 = session.resource('ec2')
@@ -103,8 +104,12 @@ def instances():
     help="Only instances for project (tag Project:<name>)")
 @click.option('--force', 'force_run', default=False, is_flag=True,
     help="Force snapshot of instances if project or instance is not specified")
-def create_snapshot(project, instance, force_run):
+@click.option('--age', default=None,
+    help="Only create snapshot if the last successful snapshot is older than the specified number of days")
+def create_snapshot(project, instance, force_run, age):
     "Create snapshots for EC2 instances"
+
+    ok_to_snapshot = True
 
     if ((project or force_run == True) or instance):
         instances = filter_instances(project, instance)
@@ -122,12 +127,19 @@ def create_snapshot(project, instance, force_run):
                     print("  Skipping {0}, snapshot already in progress".format(v.id))
                     continue
 
-                print("  Creating snapshot of {0}".format(v.id))
-                try:
-                    v.create_snapshot(Description="Created by aws_snapshot_tool")
-                except botocore.exceptions.ClientError as e:
-                    print("  Could not snapshot volume {0}. ".format(v.id) + str(e))
-                    continue
+                for s in v.snapshots.all():
+                    if (age and (s.state == 'completed') and (datetime.timedelta(days=int(age)) > datetime.datetime.now(datetime.timezone.utc) - s.start_time)):
+                        print("  Skipping {0}, snapshot younger than {1} days".format(v.id, age))
+                        ok_to_snapshot = False
+                    break
+
+                if ok_to_snapshot:
+                    print("  Creating snapshot of {0}".format(v.id))
+                    try:
+                        v.create_snapshot(Description="Created by aws_snapshot_tool")
+                    except botocore.exceptions.ClientError as e:
+                        print("  Could not snapshot volume {0}. ".format(v.id) + str(e))
+                        continue
 
             if i.id in running_instances:
                 print("Starting {0}...".format(i.id))
