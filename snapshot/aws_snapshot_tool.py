@@ -19,6 +19,32 @@ def filter_instances(project, instance=False):
 
     return instances
 
+def instances_as_table(instances):
+    instance_rows = []
+    for i in instances:
+        instance_row = {}
+        instance_row['instance_id'] = i.id
+        instance_row['instance_state'] = i.state['Name']
+        instance_row['volumes'] = None
+        volume_rows = []
+        for v in i.volumes.all():
+            volume_row = {}
+            volume_row['volume_id'] = v.id
+            volume_row['snapshots'] = None
+            snapshot_rows = []
+            for s in v.snapshots.all():
+                snapshot_row = {}
+                snapshot_row['snapshot_id'] = s.id
+                snapshot_row['snapshot_state'] = s.state
+                snapshot_row['snapshot_start_time'] = s.start_time
+                snapshot_rows.append(snapshot_row)
+            if snapshot_rows: volume_row['snapshots'] = snapshot_rows
+            volume_rows.append(volume_row)
+        if volume_rows: instance_row['volumes'] = volume_rows
+        instance_rows.append(instance_row)
+
+    return instance_rows
+
 def has_pending_snapshot(volume):
     snapshots = list(volume.snapshots.all())
     return snapshots and snapshots[0].state == 'pending'
@@ -109,42 +135,46 @@ def instances():
 def create_snapshot(project, instance, force_run, age):
     "Create snapshots for EC2 instances"
 
-    ok_to_snapshot = True
-
     if (project or force_run or instance):
-        instances = filter_instances(project, instance)
-        running_instances = []
+        instance_rows = instances_as_table(filter_instances(project, instance))
 
-        for i in instances:
-            if i.state['Name'] == 'running':
-                running_instances.append(i.id)
-                print("Stopping {0}...".format(i.id))
-                i.stop()
-                i.wait_until_stopped()
+        for instance_row in instance_rows:
+            restart_instance = False
 
-            for v in i.volumes.all():
-                if has_pending_snapshot(v):
-                    print("  Skipping {0}, snapshot already in progress".format(v.id))
-                    continue
+            for volume_row in instance_row['volumes']:
+                ok_to_snapshot = True
 
-                for s in v.snapshots.all():
-                    if (age and (s.state == 'completed') and (datetime.timedelta(days=int(age)) > datetime.datetime.now(datetime.timezone.utc) - s.start_time)):
-                        print("  Skipping {0}, snapshot younger than {1} days".format(v.id, age))
+                for snapshot_row in volume_row['snapshots']:
+                    if snapshot_row and snapshot_row['snapshot_state'] == 'pending':
+                        print("Skipping {0}, snapshot already in progress".format(volume_row['volume_id']))
                         ok_to_snapshot = False
+                    elif snapshot_row and (age and (snapshot_row['snapshot_state'] == 'completed') and (datetime.timedelta(days=int(age)) > datetime.datetime.now(datetime.timezone.utc) - snapshot_row['snapshot_start_time'])):
+                        print("Skipping {0}, snapshot younger than {1} days".format(volume_row['volume_id'], age))
+                        ok_to_snapshot = False
+
                     break
 
                 if ok_to_snapshot:
-                    print("  Creating snapshot of {0}".format(v.id))
+                    print("Creating snapshot of {0}".format(volume_row['volume_id']))
+
+                    if instance_row['instance_state'] == 'running':
+                        print("  Stopping {0}...".format(instance_row['instance_id']))
+                        ec2.Instance(instance_row['instance_id']).stop()
+                        ec2.Instance(instance_row['instance_id']).wait_until_stopped()
+                        instance_row['instance_state'] = 'stopped'
+                        restart_instance = True
+
                     try:
-                        v.create_snapshot(Description="Created by aws_snapshot_tool")
+                        ec2.Volume(volume_row['volume_id']).create_snapshot(Description="Created by aws_snapshot_tool")
                     except botocore.exceptions.ClientError as e:
-                        print("  Could not snapshot volume {0}. ".format(v.id) + str(e))
+                        print("  Could not snapshot volume {0}. ".format(volume_row['volume_id']) + str(e))
                         continue
 
-            if i.id in running_instances:
-                print("Starting {0}...".format(i.id))
-                i.start()
-                i.wait_until_running()
+            if restart_instance:
+                print("  Starting {0}...".format(instance_row['instance_id']))
+                ec2.Instance(instance_row['instance_id']).start()
+                ec2.Instance(instance_row['instance_id']).wait_until_running()
+                instance_row['instance_state'] = 'running'
 
         print("Finished")
     else:
