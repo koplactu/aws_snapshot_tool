@@ -41,7 +41,7 @@ def instances_as_table(instances, get_volumes=True, get_snapshots=True):
                 volume_row['snapshots'] = None
                 if get_snapshots:
                     snapshot_rows = []
-                    for s in v.snapshots.all():
+                    for s in sorted(list(v.snapshots.all()), key=lambda k: k.start_time, reverse=True):
                         snapshot_row = {}
                         snapshot_row['snapshot_id'] = s.id
                         snapshot_row['snapshot_state'] = s.state
