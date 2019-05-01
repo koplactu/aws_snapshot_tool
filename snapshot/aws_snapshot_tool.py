@@ -19,28 +19,38 @@ def filter_instances(project, instance=False):
 
     return instances
 
-def instances_as_table(instances):
+def instances_as_table(instances, get_volumes=True, get_snapshots=True):
     instance_rows = []
     for i in instances:
         instance_row = {}
         instance_row['instance_id'] = i.id
+        instance_row['instance_type'] = i.instance_type
         instance_row['instance_state'] = i.state['Name']
+        instance_row['instance_placement'] = i.placement['AvailabilityZone']
+        instance_row['instance_public_dns_name'] = i.public_dns_name
+        instance_row['instance_tags'] = i.tags
         instance_row['volumes'] = None
-        volume_rows = []
-        for v in i.volumes.all():
-            volume_row = {}
-            volume_row['volume_id'] = v.id
-            volume_row['snapshots'] = None
-            snapshot_rows = []
-            for s in v.snapshots.all():
-                snapshot_row = {}
-                snapshot_row['snapshot_id'] = s.id
-                snapshot_row['snapshot_state'] = s.state
-                snapshot_row['snapshot_start_time'] = s.start_time
-                snapshot_rows.append(snapshot_row)
-            if snapshot_rows: volume_row['snapshots'] = snapshot_rows
-            volume_rows.append(volume_row)
-        if volume_rows: instance_row['volumes'] = volume_rows
+        if get_volumes:
+            volume_rows = []
+            for v in i.volumes.all():
+                volume_row = {}
+                volume_row['volume_id'] = v.id
+                volume_row['volume_state'] = v.state
+                volume_row['volume_size'] = v.size
+                volume_row['volume_encrypted'] = v.encrypted
+                volume_row['snapshots'] = None
+                if get_snapshots:
+                    snapshot_rows = []
+                    for s in v.snapshots.all():
+                        snapshot_row = {}
+                        snapshot_row['snapshot_id'] = s.id
+                        snapshot_row['snapshot_state'] = s.state
+                        snapshot_row['snapshot_progress'] = s.progress
+                        snapshot_row['snapshot_start_time'] = s.start_time
+                        snapshot_rows.append(snapshot_row)
+                    if snapshot_rows: volume_row['snapshots'] = snapshot_rows
+                volume_rows.append(volume_row)
+            if volume_rows: instance_row['volumes'] = volume_rows
         instance_rows.append(instance_row)
 
     return instance_rows
@@ -74,21 +84,21 @@ def snapshots():
 def list_snapshots(project, instance, list_all):
     "List EC2 snapshots"
 
-    instances = filter_instances(project, instance)
+    instance_rows = instances_as_table(filter_instances(project, instance))
 
-    for i in instances:
-        for v in i.volumes.all():
-            for s in v.snapshots.all():
+    for instance_row in instance_rows:
+        for volume_row in instance_row['volumes']:
+            for snapshot_row in volume_row['snapshots']:
                 print(", ".join((
-                    s.id,
-                    v.id,
-                    i.id,
-                    s.state,
-                    s.progress,
-                    s.start_time.strftime("%c")
+                    snapshot_row['snapshot_id'],
+                    volume_row['volume_id'],
+                    instance_row['instance_id'],
+                    snapshot_row['snapshot_state'],
+                    snapshot_row['snapshot_progress'],
+                    snapshot_row['snapshot_start_time'].strftime("%c")
                 )))
 
-                if s.state == 'completed' and not list_all: break
+                if snapshot_row['snapshot_state'] == 'completed' and not list_all: break
 
     return
 
@@ -104,16 +114,16 @@ def volumes():
 def list_volumes(project, instance):
     "List EC2 volumes"
 
-    instances = filter_instances(project, instance)
+    instance_rows = instances_as_table(filter_instances(project, instance), True, False)
 
-    for i in instances:
-        for v in i.volumes.all():
+    for instance_row in instance_rows:
+        for volume_row in instance_row['volumes']:
             print(", ".join((
-                v.id,
-                i.id,
-                v.state,
-                str(v.size) + "GiB",
-                v.encrypted and "Encrypted" or "Not Encrypted"
+                volume_row['volume_id'],
+                instance_row['instance_id'],
+                volume_row['volume_state'],
+                str(volume_row['volume_size']) + "GiB",
+                volume_row['volume_encrypted'] and "Encrypted" or "Not Encrypted"
             )))
 
     return
@@ -188,18 +198,19 @@ def create_snapshot(project, instance, force_run, age):
 def list_instances(project):
     "List EC2 instances"
 
-    instances = filter_instances(project)
+    instance_rows = instances_as_table(filter_instances(project), False, False)
 
-    for i in instances:
-        tags = { t['Key']: t['Value'] for t in i.tags or [] }
+    for instance_row in instance_rows:
+        tags = { t['Key']: t['Value'] for t in instance_row['instance_tags'] or [] }
         print(', '.join((
-            i.id,
-            i.instance_type,
-            i.placement['AvailabilityZone'],
-            i.state['Name'],
-            i.public_dns_name,
+            instance_row['instance_id'],
+            instance_row['instance_type'],
+            instance_row['instance_placement'],
+            instance_row['instance_state'],
+            instance_row['instance_public_dns_name'],
             tags.get('Project','<no project>'))
         ))
+
     return
 
 @instances.command('start')
@@ -213,15 +224,16 @@ def start_instances(project, instance, force_run):
     "Start EC2 instances"
 
     if (project or force_run or instance):
-        instances = filter_instances(project, instance)
+        instance_rows = instances_as_table(filter_instances(project, instance), False, False)
 
-        for i in instances:
-            print("Starting {0}...".format(i.id))
-            try:
-                i.start()
-            except botocore.exceptions.ClientError as e:
-                print("  Could not start instance {0}. ".format(i.id) + str(e))
-                continue
+        for instance_row in instance_rows:
+            if instance_row['instance_state'] == 'stopped':
+                print("Starting {0}...".format(instance_row['instance_id']))
+                try:
+                    ec2.Instance(instance_row['instance_id']).start()
+                except botocore.exceptions.ClientError as e:
+                    print("  Could not start instance {0}. ".format(instance_row['instance_id']) + str(e))
+                    continue
     else:
         print("Error: project must be set unless force is set.")
 
@@ -238,15 +250,16 @@ def stop_instances(project, instance, force_run):
     "Stop EC2 instances"
 
     if (project or force_run or instance):
-        instances = filter_instances(project, instance)
+        instance_rows = instances_as_table(filter_instances(project, instance), False, False)
 
-        for i in instances:
-            print("Stopping {0}...".format(i.id))
-            try:
-                i.stop()
-            except botocore.exceptions.ClientError as e:
-                print("  Could not stop instance {0}. ".format(i.id) + str(e))
-                continue
+        for instance_row in instance_rows:
+            if instance_row['instance_state'] == 'running':
+                print("Stopping {0}...".format(instance_row['instance_id']))
+                try:
+                    ec2.Instance(instance_row['instance_id']).stop()
+                except botocore.exceptions.ClientError as e:
+                    print("  Could not stop instance {0}. ".format(instance_row['instance_id']) + str(e))
+                    continue
     else:
         print("Error: project must be set unless force is set.")
 
@@ -263,15 +276,16 @@ def reboot_instances(project, instance, force_run):
     "Reboot EC2 instances"
 
     if (project or force_run or instance):
-        instances = filter_instances(project, instance)
+        instance_rows = instances_as_table(filter_instances(project, instance), False, False)
 
-        for i in instances:
-            print("Rebooting {0}...".format(i.id))
-            try:
-                i.reboot()
-            except botocore.exceptions.UnauthorizedOperation as e:
-                print("  Could not reboot instance {0}. ".format(i.id) + str(e))
-                continue
+        for instance_row in instance_rows:
+            if instance_row['instance_state'] == 'running':
+                print("Rebooting {0}...".format(instance_row['instance_id']))
+                try:
+                    ec2.Instance(instance_row['instance_id']).reboot()
+                except botocore.exceptions.UnauthorizedOperation as e:
+                    print("  Could not reboot instance {0}. ".format(instance_row['instance_id']) + str(e))
+                    continue
     else:
         print("Error: project must be set unless force is set.")
 
