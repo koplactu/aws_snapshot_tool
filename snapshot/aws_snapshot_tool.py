@@ -29,7 +29,6 @@ def instances_as_table(instances, get_volumes=True, get_snapshots=True):
         instance_row['instance_placement'] = i.placement['AvailabilityZone']
         instance_row['instance_public_dns_name'] = i.public_dns_name
         instance_row['instance_tags'] = i.tags
-        instance_row['volumes'] = None
         if get_volumes:
             volume_rows = []
             for v in i.volumes.all():
@@ -38,7 +37,6 @@ def instances_as_table(instances, get_volumes=True, get_snapshots=True):
                 volume_row['volume_state'] = v.state
                 volume_row['volume_size'] = v.size
                 volume_row['volume_encrypted'] = v.encrypted
-                volume_row['snapshots'] = None
                 if get_snapshots:
                     snapshot_rows = []
                     for s in sorted(list(v.snapshots.all()), key=lambda k: k.start_time, reverse=True):
@@ -48,9 +46,9 @@ def instances_as_table(instances, get_volumes=True, get_snapshots=True):
                         snapshot_row['snapshot_progress'] = s.progress
                         snapshot_row['snapshot_start_time'] = s.start_time
                         snapshot_rows.append(snapshot_row)
-                    if snapshot_rows: volume_row['snapshots'] = snapshot_rows
+                    volume_row['snapshots'] = snapshot_rows
                 volume_rows.append(volume_row)
-            if volume_rows: instance_row['volumes'] = volume_rows
+            instance_row['volumes'] = volume_rows
         instance_rows.append(instance_row)
 
     return instance_rows
