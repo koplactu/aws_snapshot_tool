@@ -37,6 +37,7 @@ def instances_as_table(instances, get_volumes=True, get_snapshots=True):
                 volume_row['volume_state'] = v.state
                 volume_row['volume_size'] = v.size
                 volume_row['volume_encrypted'] = v.encrypted
+                volume_row['volume_device'] = v.attachments[0]['Device']
                 if get_snapshots:
                     snapshot_rows = []
                     for s in sorted(list(v.snapshots.all()), key=lambda k: k.start_time, reverse=True):
@@ -119,6 +120,7 @@ def list_volumes(project, instance):
             print(", ".join((
                 volume_row['volume_id'],
                 instance_row['instance_id'],
+                volume_row['volume_device'],
                 volume_row['volume_state'],
                 str(volume_row['volume_size']) + "GiB",
                 volume_row['volume_encrypted'] and "Encrypted" or "Not Encrypted"
