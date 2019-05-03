@@ -1,4 +1,5 @@
 Pipfile.lock
+.pylintrc
 .vscode/
 
 # Byte-compiled / optimized / DLL files
