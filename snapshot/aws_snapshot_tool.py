@@ -105,7 +105,7 @@ def list_snapshots(project, instance, list_all):
                 if snapshot_row['snapshot_state'] == 'completed' and not list_all:
                     break
 
-    return
+    return 0
 
 @cli.group('volumes')
 def volumes():
@@ -132,7 +132,7 @@ def list_volumes(project, instance):
                 volume_row['volume_encrypted'] and "Encrypted" or "Not Encrypted"
             )))
 
-    return
+    return 0
 
 @cli.group('instances')
 def instances():
@@ -205,7 +205,7 @@ def create_snapshot(project, instance, force_run, age):
     else:
         print("Error: project must be set unless force is set.")
 
-    return
+    return 0
 
 @instances.command('list')
 @click.option('--project', default=None, \
@@ -225,7 +225,7 @@ def list_instances(project):
             instance_row['instance_public_dns_name'],
             tags.get('Project', '<no project>'))))
 
-    return
+    return 0
 
 @instances.command('start')
 @click.option('--instance', default=None, \
@@ -252,7 +252,7 @@ def start_instances(project, instance, force_run):
     else:
         print("Error: project must be set unless force is set.")
 
-    return
+    return 0
 
 @instances.command('stop')
 @click.option('--instance', default=None, \
@@ -279,7 +279,7 @@ def stop_instances(project, instance, force_run):
     else:
         print("Error: project must be set unless force is set.")
 
-    return
+    return 0
 
 @instances.command('reboot')
 @click.option('--instance', default=None, \
@@ -306,7 +306,7 @@ def reboot_instances(project, instance, force_run):
     else:
         print("Error: project must be set unless force is set.")
 
-    return
+    return 0
 
 if __name__ == '__main__':
     cli(None)
