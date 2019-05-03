@@ -4,20 +4,17 @@ import boto3
 import botocore
 import click
 
-#session = boto3.Session(profile_name='aws_snapshot_tool')
-#ec2 = session.resource('ec2')
-
-def filter_instances(project, instance=False):
+def filter_instances(ctx, project, instance=False):
     """filter_instances"""
     instances_list = []
 
     if instance:
-        instances_list.append(ec2.Instance(instance))
+        instances_list.append(ctx.obj['ec2'].Instance(instance))
     elif project:
         filters = [{'Name': 'tag:Project', 'Values':[project]}]
-        instances_list = ec2.instances.filter(Filters=filters)
+        instances_list = ctx.obj['ec2'].instances.filter(Filters=filters)
     else:
-        instances_list = ec2.instances.all()
+        instances_list = ctx.obj['ec2'].instances.all()
 
     return instances_list
 
@@ -44,7 +41,7 @@ def instances_as_table(instance_list, get_volumes=True, get_snapshots=True):
                 if get_snapshots:
                     snapshot_rows = []
                     for snp in sorted(list(vol.snapshots.all()), key=lambda k: k.start_time, \
-                                                             reverse=True):
+                                                                 reverse=True):
                         snapshot_row = {}
                         snapshot_row['snapshot_id'] = snp.id
                         snapshot_row['snapshot_state'] = snp.state
@@ -58,21 +55,22 @@ def instances_as_table(instance_list, get_volumes=True, get_snapshots=True):
 
     return instance_rows
 
-def has_pending_snapshot(volume):
-    """has_pending_snapshot"""
-    snapshots_list = list(volume.snapshots.all())
-    return snapshots_list and snapshots_list[0].state == 'pending'
+# def has_pending_snapshot(volume):
+#     """has_pending_snapshot"""
+#     snapshots_list = list(volume.snapshots.all())
+#     return snapshots_list and snapshots_list[0].state == 'pending'
 
 @click.group()
 @click.option('--profile', default='aws_snapshot_tool', \
     help="Specify a different profile from the default 'aws_snapshot_tool'")
-def cli(profile):
+@click.pass_context
+def cli(ctx, profile):
     """AWS Snapshot Tool manages snapshots"""
 
-    global session, ec2
-
     session = boto3.Session(profile_name=profile)
-    ec2 = session.resource('ec2')
+    ctx.obj = {
+        'ec2': session.resource('ec2')
+    }
 
 @cli.group('snapshots')
 def snapshots():
@@ -85,10 +83,11 @@ def snapshots():
     help="Only snapshots for project (tag Project:<name>)")
 @click.option('--all', 'list_all', default=False, is_flag=True, \
     help="List all snapshots for each volume not just the most recent")
-def list_snapshots(project, instance, list_all):
+@click.pass_context
+def list_snapshots(ctx, project, instance, list_all):
     "List EC2 snapshots"
 
-    instance_rows = instances_as_table(filter_instances(project, instance))
+    instance_rows = instances_as_table(filter_instances(ctx, project, instance))
 
     for instance_row in instance_rows:
         for volume_row in instance_row['volumes']:
@@ -116,10 +115,11 @@ def volumes():
     help="List snapshots for a specific instance")
 @click.option('--project', default=None, \
     help="Only volumes for project (tag Project:<name>)")
-def list_volumes(project, instance):
+@click.pass_context
+def list_volumes(ctx, project, instance):
     "List EC2 volumes"
 
-    instance_rows = instances_as_table(filter_instances(project, instance), True, False)
+    instance_rows = instances_as_table(filter_instances(ctx, project, instance), True, False)
 
     for instance_row in instance_rows:
         for volume_row in instance_row['volumes']:
@@ -149,11 +149,12 @@ def instances():
 @click.option('--age', default=None, \
     help="Only create snapshot if the last successful snapshot is older than the \
             specified number of days")
-def create_snapshot(project, instance, force_run, age):
+@click.pass_context
+def create_snapshot(ctx, project, instance, force_run, age):
     "Create snapshots for EC2 instances"
 
     if (project or force_run or instance):
-        instance_rows = instances_as_table(filter_instances(project, instance))
+        instance_rows = instances_as_table(filter_instances(ctx, project, instance))
 
         for instance_row in instance_rows:
             restart_instance = False
@@ -182,13 +183,13 @@ def create_snapshot(project, instance, force_run, age):
 
                     if instance_row['instance_state'] == 'running':
                         print("  Stopping {0}...".format(instance_row['instance_id']))
-                        ec2.Instance(instance_row['instance_id']).stop()
-                        ec2.Instance(instance_row['instance_id']).wait_until_stopped()
+                        ctx.obj['ec2'].Instance(instance_row['instance_id']).stop()
+                        ctx.obj['ec2'].Instance(instance_row['instance_id']).wait_until_stopped()
                         instance_row['instance_state'] = 'stopped'
                         restart_instance = True
 
                     try:
-                        ec2.Volume(volume_row['volume_id']).create_snapshot( \
+                        ctx.obj['ec2'].Volume(volume_row['volume_id']).create_snapshot( \
                                             Description="Created by aws_snapshot_tool")
                     except botocore.exceptions.ClientError as exc:
                         print("  Could not snapshot volume {0}. ".format( \
@@ -197,8 +198,8 @@ def create_snapshot(project, instance, force_run, age):
 
             if restart_instance:
                 print("  Starting {0}...".format(instance_row['instance_id']))
-                ec2.Instance(instance_row['instance_id']).start()
-                ec2.Instance(instance_row['instance_id']).wait_until_running()
+                ctx.obj['ec2'].Instance(instance_row['instance_id']).start()
+                ctx.obj['ec2'].Instance(instance_row['instance_id']).wait_until_running()
                 instance_row['instance_state'] = 'running'
 
         print("Finished")
@@ -210,10 +211,11 @@ def create_snapshot(project, instance, force_run, age):
 @instances.command('list')
 @click.option('--project', default=None, \
     help="Only instances for project (tag Project:<name>)")
-def list_instances(project):
+@click.pass_context
+def list_instances(ctx, project):
     "List EC2 instances"
 
-    instance_rows = instances_as_table(filter_instances(project), False, False)
+    instance_rows = instances_as_table(filter_instances(ctx, project), False, False)
 
     for instance_row in instance_rows:
         tags = {t['Key']: t['Value'] for t in instance_row['instance_tags'] or []}
@@ -234,17 +236,18 @@ def list_instances(project):
     help="Only instances for project (tag Project:<name>)")
 @click.option('--force', 'force_run', default=False, is_flag=True, \
     help="Force start of instances if project or instance is not specified")
-def start_instances(project, instance, force_run):
+@click.pass_context
+def start_instances(ctx, project, instance, force_run):
     "Start EC2 instances"
 
     if (project or force_run or instance):
-        instance_rows = instances_as_table(filter_instances(project, instance), False, False)
+        instance_rows = instances_as_table(filter_instances(ctx, project, instance), False, False)
 
         for instance_row in instance_rows:
             if instance_row['instance_state'] == 'stopped':
                 print("Starting {0}...".format(instance_row['instance_id']))
                 try:
-                    ec2.Instance(instance_row['instance_id']).start()
+                    ctx.obj['ec2'].Instance(instance_row['instance_id']).start()
                 except botocore.exceptions.ClientError as exc:
                     print("  Could not start instance {0}. ".format( \
                                                     instance_row['instance_id']) + str(exc))
@@ -261,17 +264,18 @@ def start_instances(project, instance, force_run):
     help="Only instances for project (tag Project:<name>)")
 @click.option('--force', 'force_run', default=False, is_flag=True, \
     help="Force stop of instances if project or instance is not specified")
-def stop_instances(project, instance, force_run):
+@click.pass_context
+def stop_instances(ctx, project, instance, force_run):
     "Stop EC2 instances"
 
     if (project or force_run or instance):
-        instance_rows = instances_as_table(filter_instances(project, instance), False, False)
+        instance_rows = instances_as_table(filter_instances(ctx, project, instance), False, False)
 
         for instance_row in instance_rows:
             if instance_row['instance_state'] == 'running':
                 print("Stopping {0}...".format(instance_row['instance_id']))
                 try:
-                    ec2.Instance(instance_row['instance_id']).stop()
+                    ctx.obj['ec2'].Instance(instance_row['instance_id']).stop()
                 except botocore.exceptions.ClientError as exc:
                     print("  Could not stop instance {0}. ".format( \
                                                     instance_row['instance_id']) + str(exc))
@@ -288,17 +292,18 @@ def stop_instances(project, instance, force_run):
     help="Only instances for project (tag Project:<name>)")
 @click.option('--force', 'force_run', default=False, is_flag=True, \
     help="Force reboot of instances if project or instance is not specified")
-def reboot_instances(project, instance, force_run):
+@click.pass_context
+def reboot_instances(ctx, project, instance, force_run):
     "Reboot EC2 instances"
 
     if (project or force_run or instance):
-        instance_rows = instances_as_table(filter_instances(project, instance), False, False)
+        instance_rows = instances_as_table(filter_instances(ctx, project, instance), False, False)
 
         for instance_row in instance_rows:
             if instance_row['instance_state'] == 'running':
                 print("Rebooting {0}...".format(instance_row['instance_id']))
                 try:
-                    ec2.Instance(instance_row['instance_id']).reboot()
+                    ctx.obj['ec2'].Instance(instance_row['instance_id']).reboot()
                 except botocore.exceptions.ClientError as exc:
                     print("  Could not reboot instance {0}. ".format( \
                                                     instance_row['instance_id']) + str(exc))
@@ -309,4 +314,4 @@ def reboot_instances(project, instance, force_run):
     return 0
 
 if __name__ == '__main__':
-    cli(None)
+    cli(None, None)
