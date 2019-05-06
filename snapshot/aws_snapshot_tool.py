@@ -63,11 +63,13 @@ def instances_as_table(instance_list, get_volumes=True, get_snapshots=True):
 @click.group()
 @click.option('--profile', default='aws_snapshot_tool', \
     help="Specify a different profile from the default 'aws_snapshot_tool'")
+@click.option('--region', default='ap-southeast-2', \
+    help="Specify a different region from the default 'ap-southeast-2'")
 @click.pass_context
-def cli(ctx, profile):
+def cli(ctx, profile, region):
     """AWS Snapshot Tool manages snapshots"""
 
-    session = boto3.Session(profile_name=profile)
+    session = boto3.Session(profile_name=profile, region_name=region)
     ctx.obj = {
         'ec2': session.resource('ec2')
     }
