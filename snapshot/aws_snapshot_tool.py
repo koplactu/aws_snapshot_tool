@@ -71,7 +71,8 @@ def cli(ctx, profile, region):
 
     session = boto3.Session(profile_name=profile, region_name=region)
     ctx.obj = {
-        'ec2': session.resource('ec2')
+        'ec2': session.resource('ec2'),
+        'client': session.client('ec2')
     }
 
 @cli.group('snapshots')
@@ -315,5 +316,77 @@ def reboot_instances(ctx, project, instance, force_run):
 
     return 0
 
+@instances.command('teardown', \
+    help="Teardown an instance and all its associated snapshots and volumes")
+@click.option('--instance', default=None, \
+    help="Teardown a specific instance")
+@click.option('--project', default=None, \
+    help="Teardown all instances for project (tag Project:<name>)")
+@click.option('--force', 'force_run', default=False, is_flag=True, \
+    help="Force teardown of instances if project or instance is not specified")
+@click.pass_context
+def teardown_instance(ctx, project, instance, force_run):
+    "Teardown EC2 instances"
+
+    if (project or force_run or instance):
+        instance_rows = instances_as_table(filter_instances(ctx, project, instance))
+
+        for instance_row in instance_rows:
+            if instance_row['instance_state'] == 'running':
+                print("Stopping {0}...".format(instance_row['instance_id']))
+                try:
+                    ctx.obj['ec2'].Instance(instance_row['instance_id']).stop()
+                    ctx.obj['ec2'].Instance(instance_row['instance_id']).wait_until_stopped()
+                except botocore.exceptions.ClientError as exc:
+                    print("  Could not stop instance {0}. ".format( \
+                                                    instance_row['instance_id']) + str(exc))
+                    continue
+            for volume_row in instance_row['volumes']:
+                for snapshot_row in volume_row['snapshots']:
+                    try:
+                        print("Deleting snapshot {0}...".format(snapshot_row['snapshot_id']))
+                        response = ctx.obj['client'].delete_snapshot( \
+                                                SnapshotId=snapshot_row['snapshot_id'])
+                    except botocore.exceptions.ClientError as exc:
+                        print("  Could not delete snapshot {0}. ".format( \
+                                                        snapshot_row['snapshot_id']) + \
+                                                        str(exc) + '\n  ' + str(response))
+                        continue
+                try:
+                    print("Detaching volume {0}...".format(volume_row['volume_id']))
+                    response = ctx.obj['client'].detach_volume( \
+                                            VolumeId=volume_row['volume_id'])
+                    ctx.obj['client'].get_waiter('volume_available').wait( \
+                                                        VolumeIds=[volume_row['volume_id']])
+                except botocore.exceptions.ClientError as exc:
+                    print("  Could not detach volume {0}. ".format( \
+                                                    volume_row['volume_id']) + \
+                                                    str(exc) + '\n  ' + str(response))
+                    continue
+                try:
+                    print("Deleting volume {0}...".format(volume_row['volume_id']))
+                    response = ctx.obj['client'].delete_volume( \
+                                            VolumeId=volume_row['volume_id'])
+                except botocore.exceptions.ClientError as exc:
+                    print("  Could not delete volume {0}. ".format( \
+                                                    volume_row['volume_id']) + \
+                                                    str(exc) + '\n  ' + str(response))
+                    continue
+            try:
+                print("Terminating {0}...".format(instance_row['instance_id']))
+                response = ctx.obj['client'].terminate_instances( \
+                                        InstanceIds=[instance_row['instance_id']])
+            except botocore.exceptions.ClientError as exc:
+                print("  Could not terminate instance {0}. ".format( \
+                                                instance_row['instance_id']) + \
+                                                str(exc) + '\n  ' + str(response))
+                continue
+
+        print("Finished")
+    else:
+        print("Error: project must be set unless force is set.")
+
+    return 0
+
 if __name__ == '__main__':
-    cli(None, None)
+    cli(None, None, None)
