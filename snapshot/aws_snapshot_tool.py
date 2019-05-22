@@ -9,12 +9,12 @@ def filter_instances(ctx, project, instance=False):
     instances_list = []
 
     if instance:
-        instances_list.append(ctx.obj['ec2'].Instance(instance))
+        instances_list.append(ctx.obj['ec2_resource'].Instance(instance))
     elif project:
         filters = [{'Name': 'tag:Project', 'Values':[project]}]
-        instances_list = ctx.obj['ec2'].instances.filter(Filters=filters)
+        instances_list = ctx.obj['ec2_resource'].instances.filter(Filters=filters)
     else:
-        instances_list = ctx.obj['ec2'].instances.all()
+        instances_list = ctx.obj['ec2_resource'].instances.all()
 
     return instances_list
 
@@ -71,8 +71,8 @@ def cli(ctx, profile, region):
 
     session = boto3.Session(profile_name=profile, region_name=region)
     ctx.obj = {
-        'ec2': session.resource('ec2'),
-        'client': session.client('ec2')
+        'ec2_resource': session.resource('ec2'),
+        'ec2_client': session.client('ec2')
     }
 
 @cli.group('snapshots')
@@ -186,13 +186,14 @@ def create_snapshot(ctx, project, instance, force_run, age):
 
                     if instance_row['instance_state'] == 'running':
                         print("  Stopping {0}...".format(instance_row['instance_id']))
-                        ctx.obj['ec2'].Instance(instance_row['instance_id']).stop()
-                        ctx.obj['ec2'].Instance(instance_row['instance_id']).wait_until_stopped()
+                        ctx.obj['ec2_resource'].Instance(instance_row['instance_id']).stop()
+                        ctx.obj['ec2_resource'].Instance( \
+                                            instance_row['instance_id']).wait_until_stopped()
                         instance_row['instance_state'] = 'stopped'
                         restart_instance = True
 
                     try:
-                        ctx.obj['ec2'].Volume(volume_row['volume_id']).create_snapshot( \
+                        ctx.obj['ec2_resource'].Volume(volume_row['volume_id']).create_snapshot( \
                                             Description="Created by aws_snapshot_tool")
                     except botocore.exceptions.ClientError as exc:
                         print("  Could not snapshot volume {0}. ".format( \
@@ -201,8 +202,8 @@ def create_snapshot(ctx, project, instance, force_run, age):
 
             if restart_instance:
                 print("  Starting {0}...".format(instance_row['instance_id']))
-                ctx.obj['ec2'].Instance(instance_row['instance_id']).start()
-                ctx.obj['ec2'].Instance(instance_row['instance_id']).wait_until_running()
+                ctx.obj['ec2_resource'].Instance(instance_row['instance_id']).start()
+                ctx.obj['ec2_resource'].Instance(instance_row['instance_id']).wait_until_running()
                 instance_row['instance_state'] = 'running'
 
         print("Finished")
@@ -250,7 +251,7 @@ def start_instances(ctx, project, instance, force_run):
             if instance_row['instance_state'] == 'stopped':
                 print("Starting {0}...".format(instance_row['instance_id']))
                 try:
-                    ctx.obj['ec2'].Instance(instance_row['instance_id']).start()
+                    ctx.obj['ec2_resource'].Instance(instance_row['instance_id']).start()
                 except botocore.exceptions.ClientError as exc:
                     print("  Could not start instance {0}. ".format( \
                                                     instance_row['instance_id']) + str(exc))
@@ -278,7 +279,7 @@ def stop_instances(ctx, project, instance, force_run):
             if instance_row['instance_state'] == 'running':
                 print("Stopping {0}...".format(instance_row['instance_id']))
                 try:
-                    ctx.obj['ec2'].Instance(instance_row['instance_id']).stop()
+                    ctx.obj['ec2_resource'].Instance(instance_row['instance_id']).stop()
                 except botocore.exceptions.ClientError as exc:
                     print("  Could not stop instance {0}. ".format( \
                                                     instance_row['instance_id']) + str(exc))
@@ -306,7 +307,7 @@ def reboot_instances(ctx, project, instance, force_run):
             if instance_row['instance_state'] == 'running':
                 print("Rebooting {0}...".format(instance_row['instance_id']))
                 try:
-                    ctx.obj['ec2'].Instance(instance_row['instance_id']).reboot()
+                    ctx.obj['ec2_resource'].Instance(instance_row['instance_id']).reboot()
                 except botocore.exceptions.ClientError as exc:
                     print("  Could not reboot instance {0}. ".format( \
                                                     instance_row['instance_id']) + str(exc))
@@ -335,8 +336,9 @@ def teardown_instance(ctx, project, instance, force_run):
             if instance_row['instance_state'] == 'running':
                 print("Stopping {0}...".format(instance_row['instance_id']))
                 try:
-                    ctx.obj['ec2'].Instance(instance_row['instance_id']).stop()
-                    ctx.obj['ec2'].Instance(instance_row['instance_id']).wait_until_stopped()
+                    ctx.obj['ec2_resource'].Instance(instance_row['instance_id']).stop()
+                    ctx.obj['ec2_resource'].Instance( \
+                                        instance_row['instance_id']).wait_until_stopped()
                 except botocore.exceptions.ClientError as exc:
                     print("  Could not stop instance {0}. ".format( \
                                                     instance_row['instance_id']) + str(exc))
@@ -345,7 +347,7 @@ def teardown_instance(ctx, project, instance, force_run):
                 for snapshot_row in volume_row['snapshots']:
                     try:
                         print("Deleting snapshot {0}...".format(snapshot_row['snapshot_id']))
-                        response = ctx.obj['client'].delete_snapshot( \
+                        response = ctx.obj['ec2_client'].delete_snapshot( \
                                                 SnapshotId=snapshot_row['snapshot_id'])
                     except botocore.exceptions.ClientError as exc:
                         print("  Could not delete snapshot {0}. ".format( \
@@ -354,9 +356,9 @@ def teardown_instance(ctx, project, instance, force_run):
                         continue
                 try:
                     print("Detaching volume {0}...".format(volume_row['volume_id']))
-                    response = ctx.obj['client'].detach_volume( \
+                    response = ctx.obj['ec2_client'].detach_volume( \
                                             VolumeId=volume_row['volume_id'])
-                    ctx.obj['client'].get_waiter('volume_available').wait( \
+                    ctx.obj['ec2_client'].get_waiter('volume_available').wait( \
                                                         VolumeIds=[volume_row['volume_id']])
                 except botocore.exceptions.ClientError as exc:
                     print("  Could not detach volume {0}. ".format( \
@@ -365,7 +367,7 @@ def teardown_instance(ctx, project, instance, force_run):
                     continue
                 try:
                     print("Deleting volume {0}...".format(volume_row['volume_id']))
-                    response = ctx.obj['client'].delete_volume( \
+                    response = ctx.obj['ec2_client'].delete_volume( \
                                             VolumeId=volume_row['volume_id'])
                 except botocore.exceptions.ClientError as exc:
                     print("  Could not delete volume {0}. ".format( \
@@ -374,7 +376,7 @@ def teardown_instance(ctx, project, instance, force_run):
                     continue
             try:
                 print("Terminating {0}...".format(instance_row['instance_id']))
-                response = ctx.obj['client'].terminate_instances( \
+                response = ctx.obj['ec2_client'].terminate_instances( \
                                         InstanceIds=[instance_row['instance_id']])
             except botocore.exceptions.ClientError as exc:
                 print("  Could not terminate instance {0}. ".format( \
